@@ -1,35 +1,47 @@
 # Netwatch
 
-Netwatch is a small Python project for exploring how a link-state network behaves when a failure appears before the control plane has fully converged. The idea is simple: routers still forward based on stale routing tables while the real topology has changed, and the system has to detect that mismatch, identify the likely fault, and recover.
+Netwatch is a small Python project I built to study how a network behaves when a link fails before the control plane has fully converged. In that situation, routers can still forward traffic using stale forwarding tables, which leads to blackholes, loops, and broken reachability even though the topology has already changed.
 
-It is intentionally narrow and self-contained. There is no external dependency stack, no packet simulator, and no real routing daemon behind it. Instead, the project focuses on the core control-plane/data-plane gap that shows up in real networks: stale forwarding state, blackholes, loops, and diagnosis.
+The project focuses on that gap between the control plane and the data plane: detecting the failure, explaining what likely caused it, and testing a simple remediation path.
 
-## What it does
+## The problem it explores
 
-- Builds a topology and runs shortest-path routing using an OSPF-like link-state model.
-- Generates forwarding tables for each router.
-- Probes the network against the live topology while traffic is still using stale forwarding state.
-- Classifies failures as `ok`, `blackhole`, `loop`, or `noroute`.
-- Uses a simple root-cause analysis step to rank the most likely broken links.
-- Withdraws suspect links, recomputes routes, and checks whether reachability is restored.
+In real networks, outages do not always appear as a clean, instantaneous event. There is often a brief period where the routing state is inconsistent with the current physical topology.
 
-This makes it useful for understanding the difference between a healthy network and one where the control plane has not caught up yet.
+This matters because traffic can still be forwarded according to earlier decisions, even if a link has already gone down. That can produce:
 
-## Why I built it
+- blackholes, where packets disappear because the next hop is no longer valid
+- loops, where the forwarding path cycles without reaching the destination
+- partial reachability loss, where some destinations fail while others continue to work
 
-I wanted a compact way to study network failure detection and remediation without needing a full network emulator. The project is focused on one specific scenario: a link fails, the network remains partially stale, and traffic is still forwarded along paths that no longer match reality.
+Netwatch models a simplified version of that behavior and tries to detect and explain it.
 
-That is the kind of situation that often produces the most confusing outages in production networks, and it is a good target for experimenting with monitoring and diagnosis.
+## What the project does
+
+- builds a network topology and computes shortest-path forwarding tables
+- simulates link failures while the control plane is still stale
+- probes the network to detect traffic that is no longer reaching its destination
+- classifies the failed paths as `ok`, `blackhole`, `loop`, or `noroute`
+- ranks the most likely failed links using a root-cause analysis step
+- removes suspect links and checks whether the network recovers after reconvergence
+
+This is intentionally limited and readable. It is not trying to be a full production routing stack; it is trying to make a specific networking problem easy to reason about.
+
+## Why this is interesting
+
+I wanted a project that sits close to the kind of problems network engineers deal with every day: routing correctness, fault localization, and recovery after a failure. A lot of the work in network operations is less about raw throughput and more about understanding what failed, why traffic is taking the wrong path, and how to restore service quickly.
+
+This project is a small version of that mindset.
 
 ## Quick start
 
-Run the demo workflow:
+Run the demo flow:
 
 ```bash
 python -m netwatch demo
 ```
 
-This injects a fault, shows the affected paths, ranks likely causes, and demonstrates remediation.
+This shows a single injected failure, prints the failed probes, ranks the likely cause, and demonstrates remediation.
 
 Run a larger synthetic benchmark:
 
@@ -37,33 +49,31 @@ Run a larger synthetic benchmark:
 python -m netwatch bench
 ```
 
-This creates a larger topology and runs repeated single-link failure trials.
+This generates a larger topology and runs repeated single-link failure experiments.
 
-Run the test suite:
+Run the tests:
 
 ```bash
 python -m unittest discover -s tests -v
 ```
 
-## Example behavior
+## Example flow
 
-The project is designed around a pattern like this:
-
-1. A topology is created with routers and links.
+1. A topology is built with routers and links.
 2. Each router computes a forwarding table from the current link-state view.
 3. A link fails in the real network while the control plane is still unaware.
-4. Forwarding still uses the stale table, which can lead to blackholes or loops.
-5. The monitor detects failed paths.
-6. RCA ranks the suspect links.
-7. The remediation step withdraws the most likely failure and re-evaluates the network.
+4. Traffic continues to use stale forwarding entries.
+5. The monitor identifies broken paths.
+6. The RCA step ranks the most likely failing links.
+7. The remediation process withdraws the suspect link and checks whether connectivity is restored.
 
 ## Benchmark notes
 
-The synthetic benchmark in the project includes repeated single-link failure runs across larger random topologies. In the current simulation, the system performs well in a controlled environment:
+The project includes a benchmark that runs repeated single-link failure trials on larger random topologies. In the simulation, the system performs well under controlled conditions:
 
-- single-link failures are consistently ranked correctly at the top of the RCA output
-- remediation restores connectivity in the cases it is expected to fix
-- full SPF and forwarding-table construction remains fast on modest-sized topologies
+- the true failing link is usually ranked first by the RCA step
+- remediation restores reachability in the cases it is designed to heal
+- SPF and forwarding-table construction remain fast for moderate network sizes
 
 ## Project structure
 
@@ -82,16 +92,16 @@ netwatch/
 
 ## Limits
 
-This is a simulation, not a production-grade network stack. It is useful for learning and prototyping, but it does not model:
+This is a simulation, not a production routing platform. It is useful for learning and experimentation, but it does not model:
 
-- real BGP or OSPF protocol behavior
-- real packet timing or queueing
+- real OSPF or BGP protocol behavior
+- packet timing, queueing, or real network loss patterns
 - ECMP or multi-path routing
-- MPLS, tunneling, or transport-layer effects
-- noisy telemetry or real-world error distributions
+- MPLS, tunneling, or transport-layer behavior
+- noisy telemetry or real-world operational complexity
 
-The current implementation is intentionally deterministic and clean, which helps make the failure logic easy to reason about.
+That is intentional. The project is meant to be clear and focused rather than trying to simulate an entire network stack.
 
 ## Summary
 
-Netwatch is a compact networking project for exploring how stale routing state leads to failures, how those failures can be detected and explained, and how simple automated remediation can restore service. It is a good fit for someone who wants to work on routing, failure analysis, and network reliability in a small, readable codebase.
+Netwatch is a compact networking project for exploring stale forwarding state, failure detection, and automated recovery in a simplified link-state environment. It is not a massive platform, but it is a solid example of systems thinking in networking: observe the behavior, reason about the failure, and test a recovery strategy.
